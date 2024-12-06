@@ -1,8 +1,9 @@
 import json
+import os
 import subprocess
 import vapoursynth as vs
 
-source = (".mkv")
+source = ("source.mkv")
 
 input("WARNING: Run from local folder!\nPress Enter to continue.")
 
@@ -55,30 +56,38 @@ def extract_rpu(source):
 
 
 def get_total_frames(source, method):
-    core = vs.core
-
     if method == 'a':
+        if os.path.exists(f"{source}.ffindex"):
+            print(
+                f'Existing index file found: "{source}.ffindex". Skipping indexing.'
+            )
+        else:
+            try:
+                subprocess.run(f"ffmsindex '{source}'", shell=True, check=True)
+            except Exception as e:
+                print(f"Error during indexing: {e}")
+
         try:
-            clip = core.lsmas.LWLibavSource(source)
+            clip = vs.core.ffms2.Source(source)
+            return clip.num_frames
+        except Exception as e:
+            print(f"Error using ffms2: {e}")
+            return None
+
+    elif method == 'b':
+        try:
+            clip = vs.core.lsmas.LWLibavSource(source)
             return clip.num_frames
         except Exception as e:
             print(f"Error using lsmash: {e}")
             return None
 
-    elif method == 'b':
+    elif method == 'c':
         try:
-            clip = core.bs.VideoSource(source)
+            clip = vs.core.bs.VideoSource(source)
             return clip.num_frames
         except Exception as e:
             print(f"Error using bestsource: {e}")
-            return None
-
-    elif method == 'c':
-        try:
-            clip = core.ffms2.Source(source)
-            return clip.num_frames
-        except Exception as e:
-            print(f"Error using ffms2: {e}")
             return None
 
     elif method.isdigit():
@@ -94,11 +103,14 @@ def generate_scenes_json(input_file, output_file, total_frames,
         with open(input_file, 'r') as f:
             numbers = [int(line.strip()) for line in f]
 
+        # Ensure total_frames is an integer
         total_frames = int(total_frames)
 
+        # Include the final frame (total_frames) as the last endpoint
         if numbers[-1] != total_frames:
             numbers.append(total_frames)
 
+        # If max_scene_length is 0, use the original numbers without interpolation
         if max_scene_length > 0:
             interpolated_numbers = []
             for i in range(len(numbers) - 1):
@@ -113,6 +125,7 @@ def generate_scenes_json(input_file, output_file, total_frames,
         else:
             interpolated_numbers = numbers
 
+        # Generate scene data
         scenes = [{
             "start_frame": interpolated_numbers[i],
             "end_frame": interpolated_numbers[i + 1],
@@ -135,12 +148,13 @@ extract_rpu(source)
 while True:
     method = input(
         """To get the total number of frames, either choose an indexing method with:
-    a for lsmash (Default, just press Enter)
-    b for bestsource
-    c for ffms2
+    a for ffms2 (Default, just press Enter)
+    b for lsmash
+    c for bestsource
 or enter the total number of frames manually: """).lower().strip() or 'a'
     total_frames = get_total_frames(source, method)
     if total_frames is not None:
+        print(f"Total frames: {total_frames}")
         break
     print("Invalid input. Please try again.")
 
