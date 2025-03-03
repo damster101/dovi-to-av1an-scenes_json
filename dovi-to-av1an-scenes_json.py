@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
+
 import json
 import subprocess
 
-source = "source.mkv"
-rpu = f"{source}.rpu"
+__version__ = "v1.1.0"
+print(__version__)
 
 
 def ask_yes_no(prompt, default="no"):
@@ -17,6 +19,7 @@ def extract_rpu(source):
             "\nDo you want to extract the RPU from video source? (yes/No):",
             default="no"):
         rpu_compat = f"{source}_compat.rpu"
+        rpu = f"{source}.rpu"
         print("Extracting RPU...")
         cmd = f"""
         ffmpeg -i "{source}" -c:v copy -bsf hevc_mp4toannexb -f hevc - | 
@@ -26,7 +29,11 @@ def extract_rpu(source):
         subprocess.run(["bash", "-c", cmd.strip()], check=True)
     else:
         print("Skipping RPU extraction")
+        rpu = f"{source}.rpu"  # Assume existing file with this name
+    return rpu
 
+
+def optional_rpu_operations(rpu):
     if ask_yes_no(
             "\nDo you want to plot dynamic tonemapping metadata? (yes/No):",
             default="no"):
@@ -67,9 +74,8 @@ def get_total_frames(rpu):
 
 def generate_scenes_json(input_file, output_file, total_frames,
                          max_scene_length):
-    print(f"\nGenerate {output_file} for Av1an")
+    print(f"\nGenerate {output_file} for use with Av1an")
 
-    #print("Extracting scene cuts")
     subprocess.run(["dovi_tool", "export", "-d", f"scenes={input_file}", rpu],
                    check=True)
 
@@ -106,10 +112,19 @@ def generate_scenes_json(input_file, output_file, total_frames,
     print(f"Scenes JSON written to {output_file}")
 
 
-print("WARNING: Run from local folder!")
-input("Press Enter to continue.")
-
-extract_rpu(source)
+source_type = input(
+    "Do you want to use a Dolby Vision video file or RPU file as source? (Enter 'video' or 'rpu'): "
+).strip().lower()
+if source_type == "video":
+    source = input("Enter source video file path: ").strip()
+    rpu = extract_rpu(source)
+    optional_rpu_operations(rpu)
+elif source_type == "rpu":
+    rpu = input("Enter RPU file path: ").strip()
+    optional_rpu_operations(rpu)
+else:
+    print("Invalid source type. Exiting.")
+    exit(1)
 
 total_frames = get_total_frames(rpu)
 print(f"Total number of frames: {total_frames}")
@@ -122,7 +137,9 @@ try:
 except ValueError:
     print("Invalid input, using no limit.")
     max_scene_length = 0
-
-scenes_json_filename = f"scenes-max{max_scene_length}.json" if max_scene_length > 0 else "scenes.json"
+if max_scene_length > 0:
+    scenes_json_filename = f"{rpu}-av1an-scenes-max{max_scene_length}.json"
+else:
+    scenes_json_filename = f"{rpu}-av1an-scenes.json"
 generate_scenes_json(f"{rpu}-scenes.txt", scenes_json_filename, total_frames,
                      max_scene_length)
