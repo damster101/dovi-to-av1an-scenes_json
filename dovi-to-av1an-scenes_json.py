@@ -2,8 +2,10 @@
 
 import json
 import subprocess
+import shlex
+import pathlib
 
-__version__ = "v1.1.0"
+__version__ = "v1.1.1"
 print(__version__)
 
 
@@ -21,12 +23,25 @@ def extract_rpu(source):
         rpu_compat = f"{source}_compat.rpu"
         rpu = f"{source}.rpu"
         print("Extracting RPU...")
-        cmd = f"""
-        ffmpeg -i "{source}" -c:v copy -bsf hevc_mp4toannexb -f hevc - | 
-        tee >(dovi_tool -m 2 -c extract-rpu -o "{rpu_compat}" -) | 
-        dovi_tool extract-rpu -o "{rpu}" -
-        """
-        subprocess.run(["bash", "-c", cmd.strip()], check=True)
+        ff = subprocess.Popen([
+            "ffmpeg", "-i", source, "-c:v", "copy", "-bsf", "hevc_mp4toannexb",
+            "-f", "hevc", "-"
+        ],
+                              stdout=subprocess.PIPE)
+        dovi1 = subprocess.Popen([
+            "dovi_tool", "-m", "2", "-c", "extract-rpu", "-o", rpu_compat, "-"
+        ],
+                                 stdin=subprocess.PIPE)
+        dovi2 = subprocess.Popen(["dovi_tool", "extract-rpu", "-o", rpu, "-"],
+                                 stdin=subprocess.PIPE)
+        for chunk in iter(lambda: ff.stdout.read(65536), b""):
+            dovi1.stdin.write(chunk)
+            dovi2.stdin.write(chunk)
+        dovi1.stdin.close()
+        dovi2.stdin.close()
+        ff.wait()
+        dovi1.wait()
+        dovi2.wait()
     else:
         print("Skipping RPU extraction")
         rpu = f"{source}.rpu"  # Assume existing file with this name
@@ -116,11 +131,15 @@ source_type = input(
     "Do you want to use a Dolby Vision video file or RPU file as source? (Enter 'video' or 'rpu'): "
 ).strip().lower()
 if source_type == "video":
-    source = input("Enter source video file path: ").strip()
+    raw_input = input("Enter source video file path: ").strip()
+    path = shlex.split(raw_input)[0]
+    source = str(pathlib.Path(path).expanduser().resolve())
     rpu = extract_rpu(source)
     optional_rpu_operations(rpu)
 elif source_type == "rpu":
-    rpu = input("Enter RPU file path: ").strip()
+    raw_input = input("Enter RPU file path: ").strip()
+    path = shlex.split(raw_input)[0]
+    rpu = str(pathlib.Path(path).expanduser().resolve())
     optional_rpu_operations(rpu)
 else:
     print("Invalid source type. Exiting.")
